@@ -9,6 +9,8 @@ import "validate/validate.proto";
 message AddrInfoStatus {
   // Indicates whether the replica was successfully added.
   bool is_added = 1 [(validate.rules).bool.const = true];
+
+  repeated string nodes = 2; 
 }
 
 // AddrInfo contains the address information for a replica.

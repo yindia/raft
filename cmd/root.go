@@ -115,11 +115,13 @@ func runRootCommand() error {
 
 	if joinAddr != "" {
 		slog.Info("Attempting to add replica", "joinAddr", joinAddr) // Improved logging
-		if _, err := raftv1connect.NewBootstrapServiceClient(http.DefaultClient, joinAddr).AddReplica(context.Background(), connect.NewRequest((&raftv1.AddrInfo{
+		nodeResponse, err := raftv1connect.NewBootstrapServiceClient(http.DefaultClient, joinAddr).AddReplica(context.Background(), connect.NewRequest((&raftv1.AddrInfo{
 			Addr: httpAddr,
-		}))); err != nil {
+		})))
+		if err != nil {
 			slog.Error("Failed to add replica", "error", err) // Improved logging
 		}
+		raftServer.BootstrapNodes = nodeResponse.Msg.Nodes
 	}
 	return handleServerLifecycle(srv, exitChan, serverErrChan)
 }

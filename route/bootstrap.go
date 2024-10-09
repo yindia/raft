@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+
+	"log/slog"
 	"net/http"
 
 	v1 "raft/internal/gen/raft/v1"
@@ -23,7 +25,7 @@ type BootstrapServiceHandler interface {
 // It implements the v1.RedisServiceHandler interface.
 type BootstrapServer struct {
 	validator  *protovalidate.Validator
-	logger     *log.Logger
+	logger     *slog.Logger // Change logger type to slog.Logger
 	raftServer *raft.RaftServer
 }
 
@@ -32,17 +34,19 @@ type BootstrapServer struct {
 func NewBootstrapServer(raftServer *raft.RaftServer) *BootstrapServer {
 	validator, err := protovalidate.New()
 	if err != nil {
-		log.Fatalf("Failed to initialize validator: %v", err)
+		slog.Error("Failed to initialize validator", "error", err) // Use slog for logging
 	}
 
 	server := BootstrapServer{
-		validator:  validator,
-		logger:     log.New(log.Writer(), "BootstrapServer: ", log.LstdFlags|log.Lshortfile),
+		validator: validator,
+		logger: slog.New(slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		})), // Initialize slog logger
 		raftServer: raftServer,
 	}
 
-	server.logger.Println("BootstrapServer initialized successfully")
-	return &server // Return a pointer to the server
+	server.logger.Info("BootstrapServer initialized successfully") // Use slog for logging
+	return &server                                                 // Return a pointer to the server
 }
 
 // Join adds a new node to the cluster
@@ -50,9 +54,11 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 	if err := s.validator.Validate(req.Msg); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	nodes := s.raftServer.BootstrapNodes
+	s.raftServer.BootstrapNodes = append(s.raftServer.BootstrapNodes, req.Msg.Addr)
 	if ok := s.raftServer.ReplicaBootstrapConnMap[req.Msg.Addr]; ok != nil {
 		// raft server already present
-		log.Printf("raft server [%s] present in replicaConnMap", req.Msg.Addr)
+		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
 		return connect.NewResponse(&v1.AddrInfoStatus{
 			IsAdded: false,
 		}), nil
@@ -64,7 +70,7 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 
 	if ok := s.raftServer.ReplicaElectionConnMap[req.Msg.Addr]; ok != nil {
 		// raft server already present
-		log.Printf("raft server [%s] present in replicaConnMap", req.Msg.Addr)
+		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
 		return connect.NewResponse(&v1.AddrInfoStatus{
 			IsAdded: false,
 		}), nil
@@ -76,7 +82,7 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 
 	if ok := s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr]; ok != nil {
 		// raft server already present
-		log.Printf("raft server [%s] present in replicaConnMap", req.Msg.Addr)
+		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
 		return connect.NewResponse(&v1.AddrInfoStatus{
 			IsAdded: false,
 		}), nil
@@ -88,7 +94,7 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 
 	if ok := s.raftServer.ReplicaReplicateConnMap[req.Msg.Addr]; ok != nil {
 		// raft server already present
-		log.Printf("raft server [%s] present in replicaConnMap", req.Msg.Addr)
+		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
 		return connect.NewResponse(&v1.AddrInfoStatus{
 			IsAdded: false,
 		}), nil
@@ -100,5 +106,6 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 
 	return connect.NewResponse(&v1.AddrInfoStatus{
 		IsAdded: true,
+		Nodes:   nodes,
 	}), nil
 }

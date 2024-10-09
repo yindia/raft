@@ -24,7 +24,7 @@ type HeartbeatServer struct {
 
 // NewHeartbeatServer creates and returns a new instance of HeartbeatServer.
 // It initializes the validator and sets up the logger.
-func NewHeartbeatServer() *HeartbeatServiceHandler {
+func NewHeartbeatServer() *HeartbeatServer {
 	validator, err := protovalidate.New()
 	if err != nil {
 		log.Fatalf("Failed to initialize validator: %v", err)

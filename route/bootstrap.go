@@ -24,19 +24,19 @@ type BootstrapServer struct {
 
 // NewBootstrapServer creates and returns a new instance of BootstrapServer.
 // It initializes the validator and sets up the logger.
-func NewBootstrapServer() *BootstrapServiceHandler {
+func NewBootstrapServer() *BootstrapServer {
 	validator, err := protovalidate.New()
 	if err != nil {
 		log.Fatalf("Failed to initialize validator: %v", err)
 	}
 
-	server := &BootstrapServer{
+	server := BootstrapServer{
 		validator: validator,
 		logger:    log.New(log.Writer(), "BootstrapServer: ", log.LstdFlags|log.Lshortfile),
 	}
 
 	server.logger.Println("BootstrapServer initialized successfully")
-	return server
+	return &server // Return a pointer to the server
 }
 
 // Join adds a new node to the cluster

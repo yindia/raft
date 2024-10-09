@@ -1,24 +1,15 @@
 package cmd
 
 import (
-	"raft/internal/gen/raft/v1/raftv1connect"
-	"raft/route"
-)
-package cmd
-
-import (
 	"context"
-	"log"
+	"raft/internal/gen/raft/v1/raftv1connect"
 
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	v1 "redis/internal/gen/cloud/v1"
-	cloudv1connect "redis/internal/gen/cloud/v1/cloudv1connect"
-	"redis/internal/route"
-	store "redis/internal/store"
+	"raft/route"
 	"strings"
 	"syscall"
 	"time"
@@ -98,11 +89,6 @@ func runRoot(cmd *cobra.Command, args []string) {
 func runRootCommand() error {
 	initLogger(logLevel)
 
-	if err := os.MkdirAll(raftDir, 0700); err != nil {
-		return fmt.Errorf("failed to create Raft storage directory: %w", err)
-	}
-
-
 	exitChan := make(chan os.Signal, 1)
 	signal.Notify(exitChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -142,7 +128,6 @@ func initLogger(level string) {
 	slog.SetDefault(logger)
 }
 
-
 func authenticateRequest(ctx context.Context, req *connectauth.Request) (any, error) {
 	// TODO: Implement your authentication logic here
 	return nil, nil
@@ -153,7 +138,7 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 	if err != nil {
 		return fmt.Errorf("failed to create interceptor: %w", err)
 	}
-	pattern, handler := raftv1connect.NewBootstrapServiceClient(
+	pattern, handler := raftv1connect.NewBootstrapServiceHandler(
 		route.NewBootstrapServer(),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
@@ -161,35 +146,33 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 
 	mux.Handle(pattern, middleware.Wrap(handler))
 
-	pattern, handler := raftv1connect.NewElectionServiceHandler(
-		*route.NewElectionServer(),
+	pattern, handler = raftv1connect.NewElectionServiceHandler(
+		route.NewElectionServer(),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
 	)
 
 	mux.Handle(pattern, middleware.Wrap(handler))
 
-
-	pattern, handler := raftv1connect.NewHeartbeatServiceHandler(
-		*route.NewHeartbeatServer(),
+	pattern, handler = raftv1connect.NewHeartbeatServiceHandler(
+		route.NewHeartbeatServer(),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
 	)
 
 	mux.Handle(pattern, middleware.Wrap(handler))
-
 
 	mux.Handle(grpchealth.NewHandler(
-		grpchealth.NewStaticChecker(cloudv1connect.RedisServiceName),
+		grpchealth.NewStaticChecker(raftv1connect.BootstrapServiceName),
 	))
 	mux.Handle(grpcreflect.NewHandlerV1(
-		grpcreflect.NewStaticReflector(cloudv1connect.RedisServiceName),
+		grpcreflect.NewStaticReflector(raftv1connect.BootstrapServiceName),
 	))
 	mux.Handle(grpcreflect.NewHandlerV1Alpha(
-		grpcreflect.NewStaticReflector(cloudv1connect.RedisServiceName),
+		grpcreflect.NewStaticReflector(raftv1connect.BootstrapServiceName),
 	))
 
-	slog.Info("Handlers set up successfully", "serviceName", cloudv1connect.RedisServiceName)
+	slog.Info("Handlers set up successfully", "serviceName", raftv1connect.BootstrapServiceName)
 	return nil
 }
 
@@ -217,7 +200,6 @@ func startServer(srv *http.Server) chan error {
 	}()
 	return serverErrChan
 }
-
 
 func handleServerLifecycle(srv *http.Server, exitChan chan os.Signal, serverErrChan chan error) error {
 	select {

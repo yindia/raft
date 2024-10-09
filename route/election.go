@@ -24,7 +24,7 @@ type ElectionServer struct {
 
 // NewElectionServer creates and returns a new instance of ElectionServer.
 // It initializes the validator and sets up the logger.
-func NewElectionServer() *ElectionServiceHandler {
+func NewElectionServer() *ElectionServer {
 	validator, err := protovalidate.New()
 	if err != nil {
 		log.Fatalf("Failed to initialize validator: %v", err)

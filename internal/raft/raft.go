@@ -64,6 +64,9 @@ type RaftServer struct {
 
 	ReplicaBootstrapConnMap     ReplicaConnMap[string, raftv1connect.BootstrapServiceClient]
 	ReplicaBootstrapConnMapLock sync.RWMutex
+
+	ReplicaReplicateConnMap     ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient]
+	ReplicaReplicateConnMapLock sync.RWMutex
 }
 
 type ReplicaConnMap[K comparable, V any] map[K]V
@@ -106,6 +109,8 @@ func (s *RaftServer) Start() error {
 	// Send requests to bootstrapped servers to add this server to their `replicaConnMap`.
 	s.bootstrapNetwork()
 
+	s.startHeartbeatTimeoutProcess()
+
 	log.Println("Raft server started successfully.")
 	return nil
 }
@@ -114,12 +119,24 @@ func (s *RaftServer) CommitIndex() int {
 	return s.commitIndex
 }
 
-func (s *RaftServer) Role() int {
-	return int(s.role)
+func (s *RaftServer) CommitIndexInc() {
+	s.commitIndex++
+}
+
+func (s *RaftServer) ApplyCh(appliedTxn *logfile.Transaction) {
+	s.applyCh <- appliedTxn
 }
 
 func (s *RaftServer) SetLeader(addr string) {
 	s.leaderAddr = addr
+}
+
+func (s *RaftServer) GetLog() logfile.Log {
+	return s.logfile
+}
+
+func (s *RaftServer) Role() int {
+	return int(s.role)
 }
 
 // bootstrapNetwork sends requests to other replicas to add this server to their replicaConnMap.

@@ -2,6 +2,7 @@ package route
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -58,7 +59,7 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 	}
 
 	s.raftServer.ReplicaBootstrapConnMapLock.Lock()
-	s.raftServer.ReplicaBootstrapConnMap[req.Msg.Addr] = raftv1connect.NewBootstrapServiceClient(http.DefaultClient, req.Msg.Addr)
+	s.raftServer.ReplicaBootstrapConnMap[req.Msg.Addr] = raftv1connect.NewBootstrapServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
 	s.raftServer.ReplicaBootstrapConnMapLock.Unlock()
 
 	if ok := s.raftServer.ReplicaElectionConnMap[req.Msg.Addr]; ok != nil {
@@ -70,7 +71,7 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 	}
 
 	s.raftServer.ReplicaElectionConnMapLock.Lock()
-	s.raftServer.ReplicaElectionConnMap[req.Msg.Addr] = raftv1connect.NewElectionServiceClient(http.DefaultClient, req.Msg.Addr)
+	s.raftServer.ReplicaElectionConnMap[req.Msg.Addr] = raftv1connect.NewElectionServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
 	s.raftServer.ReplicaElectionConnMapLock.Unlock()
 
 	if ok := s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr]; ok != nil {
@@ -82,8 +83,20 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 	}
 
 	s.raftServer.ReplicaHeartbeatConnMapLock.Lock()
-	s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr] = raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, req.Msg.Addr)
+	s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr] = raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
 	s.raftServer.ReplicaHeartbeatConnMapLock.Unlock()
+
+	if ok := s.raftServer.ReplicaReplicateConnMap[req.Msg.Addr]; ok != nil {
+		// raft server already present
+		log.Printf("raft server [%s] present in replicaConnMap", req.Msg.Addr)
+		return connect.NewResponse(&v1.AddrInfoStatus{
+			IsAdded: false,
+		}), nil
+	}
+
+	s.raftServer.ReplicaReplicateConnMapLock.Lock()
+	s.raftServer.ReplicaReplicateConnMap[req.Msg.Addr] = raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
+	s.raftServer.ReplicaReplicateConnMapLock.Unlock()
 
 	return connect.NewResponse(&v1.AddrInfoStatus{
 		IsAdded: true,

@@ -176,6 +176,14 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware, raftS
 
 	mux.Handle(pattern, middleware.Wrap(handler))
 
+	pattern, handler = raftv1connect.NewReplicateOperationServiceHandler(
+		route.NewReplicateServer(raftServer),
+		connect.WithInterceptors(otelInterceptor),
+		connect.WithCompressMinBytes(compressMinBytes),
+	)
+
+	mux.Handle(pattern, middleware.Wrap(handler))
+
 	mux.Handle(grpchealth.NewHandler(
 		grpchealth.NewStaticChecker(raftv1connect.BootstrapServiceName),
 	))

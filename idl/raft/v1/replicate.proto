@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package raft.v1;
+
+import "google/protobuf/duration.proto";
+// Ensure the validate.proto is correctly imported and contains the necessary rules
+import "validate/validate.proto"; // Check if this file is correctly set up
+
+
+message CommitTransaction {
+    // The expected final index of the log entry.
+    int64 expectedFinalIndex = 1; // Removed validation rule
+
+    // The index of the log entry being committed.
+    int64 index = 2; // Removed validation rule
+
+    // The operation to be committed, represented as a string.
+    string operation = 3; // Removed validation rule
+
+    // The term number of the log entry.
+    int64 term = 4; // Removed validation rule
+}
+  
+message CommitOperationResponse {
+    // The final index of the log file after the commit operation.
+    int64 logfileFinalIndex = 1; // Removed validation rule
+}
+
+message ApplyOperationRequest {
+    // Request message for applying an operation.
+    // Currently, this message does not contain any fields but can be extended in the future.
+}
+
+message ApplyOperationResponse {
+    // Response message for the result of applying an operation.
+    // This message can be extended to include additional information about the operation's outcome.
+}
+
+message ForwardOperationRequest { 
+    // The operation to be forwarded, represented as a string.
+    // This should not be empty.
+    string operation = 1; // Removed validation rule 
+}
+
+message ForwardOperationResponse {
+    // Response message for the result of the forwarded operation.
+    // This message can be extended to include additional information about the operation's outcome.
+}
+
+// The ReplicateOperationService provides methods for committing, applying, and forwarding operations
+// in a distributed log system. It allows clients to interact with the log by committing transactions,
+// applying operations, and forwarding operations to other nodes in the system.
+service ReplicateOperationService {
+    rpc CommitOperation(CommitTransaction) returns (CommitOperationResponse) {}
+    rpc ApplyOperation(ApplyOperationRequest) returns (ApplyOperationResponse) {}
+    rpc ForwardOperation(ForwardOperationRequest)
+        returns (ForwardOperationResponse) {}
+}

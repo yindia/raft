@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	raftv1 "raft/internal/gen/raft/v1"
 	"raft/internal/gen/raft/v1/raftv1connect"
 	"raft/internal/raft"
 
@@ -70,7 +71,6 @@ func init() {
 	// Local flags
 	rootCmd.Flags().StringVar(&raftDir, "dir", "", "Raft storage directory")
 	rootCmd.Flags().StringVar(&httpAddr, "addr", "127.0.0.1:12000", "HTTP server address")
-	rootCmd.Flags().StringVar(&raftAddr, "raft-addr", "127.0.0.1:12001", "Raft bind address")
 	rootCmd.Flags().StringVar(&joinAddr, "join", "", "Set join address, if any")
 	rootCmd.Flags().StringVar(&nodeID, "id", "", "Node ID. If not set, same as Raft bind address")
 
@@ -94,9 +94,15 @@ func runRootCommand() error {
 	signal.Notify(exitChan, syscall.SIGINT, syscall.SIGTERM)
 
 	middleware := connectauth.NewMiddleware(authenticateRequest)
+	raftServer, _ := raft.NewRaftServer(raft.RaftServerOpts{
+		Address:        httpAddr,
+		BootstrapNodes: []string{},
+		Role:           raft.ROLE_FOLLOWER,
+	})
+	raftServer.Start()
 
 	mux := http.NewServeMux()
-	if err := setupHandlers(mux, middleware); err != nil {
+	if err := setupHandlers(mux, middleware, raftServer); err != nil {
 		return fmt.Errorf("failed to set up handlers: %w", err)
 	}
 
@@ -106,6 +112,12 @@ func runRootCommand() error {
 
 	serverErrChan := startServer(srv)
 
+	if joinAddr != "" {
+		fmt.Println(raftv1connect.NewBootstrapServiceClient(http.DefaultClient, joinAddr).AddReplica(context.Background(), connect.NewRequest((&raftv1.AddrInfo{
+			Addr: httpAddr,
+		}))))
+
+	}
 	return handleServerLifecycle(srv, exitChan, serverErrChan)
 }
 
@@ -134,17 +146,12 @@ func authenticateRequest(ctx context.Context, req *connectauth.Request) (any, er
 	return nil, nil
 }
 
-func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error {
+func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware, raftServer *raft.RaftServer) error {
 	otelInterceptor, err := otelconnect.NewInterceptor()
 	if err != nil {
 		return fmt.Errorf("failed to create interceptor: %w", err)
 	}
 
-	raftServer, _ := raft.NewRaftServer(raft.RaftServerOpts{
-		Address:        raftAddr,
-		BootstrapNodes: []string{},
-		Role:           raft.ROLE_FOLLOWER,
-	})
 	pattern, handler := raftv1connect.NewBootstrapServiceHandler(
 		route.NewBootstrapServer(raftServer),
 		connect.WithInterceptors(otelInterceptor),

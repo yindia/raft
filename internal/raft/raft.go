@@ -76,6 +76,10 @@ func NewRaftServer(opts RaftServerOpts) (*RaftServer, map[string]string) {
 		Heartbeat:      heartbeat.NewHeartbeat(HEARTBEAT_PERIOD, func() {}),
 		logfile:        logfile.NewLogfile(),
 		applyCh:        make(chan *logfile.Transaction),
+
+		ReplicaElectionConnMap:  make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient]),
+		ReplicaHeartbeatConnMap: make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]),
+		ReplicaBootstrapConnMap: make(ReplicaConnMap[string, raftv1connect.BootstrapServiceClient]),
 	}
 	filePath := fmt.Sprintf("%s/%s.%s", SNAPSHOTS_DIR, opts.Address, FILE_EXTENSION)
 	_, err := os.Stat(filePath)
@@ -130,17 +134,17 @@ func (s *RaftServer) bootstrapNetwork() {
 		}
 		go func(s *RaftServer, addr string, wg *sync.WaitGroup) {
 			log.Printf("Attempting to connect with bootstrap node [%s].", addr)
-			// client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
-			// if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
-			// 	log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
-			// } else {
-			// 	log.Printf("Successfully connected to bootstrap node [%s].", addr)
-			// }
+			client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
+			if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
+				log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
+			} else {
+				log.Printf("Successfully connected to bootstrap node [%s].", addr)
+			}
 			wg.Done()
 		}(s, addr, wg)
 	}
 	wg.Wait()
-	log.Printf("Bootstrapping completed for server [%s].", s.Transport.Addr)
+	log.Printf("Bootstrapping completed for server.")
 }
 
 // startHeartbeatTimeoutProcess initiates the heartbeat timeout process for a FOLLOWER.

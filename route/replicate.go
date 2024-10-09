@@ -72,12 +72,12 @@ func (s *ReplicateServer) ApplyOperation(ctx context.Context, req *connect.Reque
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	appliedTxn, err := s.raftServer.GetLog().ApplyOperation()
+	_, err := s.raftServer.GetLog().ApplyOperation()
 	if err != nil {
 		return nil, err
 	}
 	s.raftServer.CommitIndexInc()
-	s.raftServer.ApplyCh(appliedTxn)
+
 	return connect.NewResponse(&v1.ApplyOperationResponse{}), nil
 }
 

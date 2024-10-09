@@ -3,6 +3,7 @@ package raft
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -84,9 +85,7 @@ func NewRaftServer(opts RaftServerOpts) (*RaftServer, map[string]string) {
 		BootstrapNodes: opts.BootstrapNodes,
 		Heartbeat:      heartbeat.NewHeartbeat(HEARTBEAT_PERIOD, func() {}),
 		logfile:        logfile.NewLogfile(),
-		applyCh:        make(chan *logfile.Transaction),
 		localAddr:      opts.Address,
-		commitIndex:    0,
 
 		ReplicaElectionConnMap:  make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient]),
 		ReplicaHeartbeatConnMap: make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]),
@@ -128,12 +127,9 @@ func (s *RaftServer) CommitIndex() int {
 	return s.commitIndex
 }
 
-func (s *RaftServer) CommitIndexInc() {
+func (s *RaftServer) CommitIndexInc() int {
 	s.commitIndex++
-}
-
-func (s *RaftServer) ApplyCh(appliedTxn *logfile.Transaction) {
-	s.applyCh <- appliedTxn
+	return s.commitIndex
 }
 
 func (s *RaftServer) SetLeader(addr string) {
@@ -150,6 +146,10 @@ func (s *RaftServer) Role() int {
 
 func (s *RaftServer) Addr() string {
 	return s.localAddr
+}
+
+func (s *RaftServer) Leader() string {
+	return s.leaderAddr
 }
 
 // bootstrapNetwork sends requests to other replicas to add this server to their replicaConnMap.
@@ -441,4 +441,26 @@ func sendOperationToLeader(operation string, conn raftv1connect.ReplicateOperati
 		return err
 	}
 	return nil
+}
+
+// Performs the operation requested by the client.
+func (s *RaftServer) PerformOperation(operation string) error {
+	// only the LEADER is allowed to perform the operation
+	// and it then replicates that operation across all the nodes.
+	// if the current node is not a LEADER, the operation request
+	// will be forwarded to the LEADER, who will then perform the operation
+	log.Printf("[%s] received operation (%s)\n", operation)
+	if s.role == ROLE_LEADER {
+		txn, err := s.ConvertToTransaction(operation)
+		if err != nil {
+			return fmt.Errorf("[%s] error while converting to transaction")
+		}
+		return s.PerformTwoPhaseCommit(txn)
+	}
+	log.Printf("forwarding operation (%s) to leader [%s]\n", operation, s.leaderAddr)
+	s.ReplicaReplicateConnMapLock.RLock()
+	defer s.ReplicaReplicateConnMapLock.RUnlock()
+
+	// sending operation to the LEADER to perform a TwoPhaseCommit
+	return sendOperationToLeader(operation, s.ReplicaReplicateConnMap[s.leaderAddr])
 }

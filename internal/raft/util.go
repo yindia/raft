@@ -78,16 +78,6 @@ func destructureSnapshot(content []byte) (int, map[string]string) {
 	return commitIndex, decodedKVMap
 }
 
-func Encode(data interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := gob.NewEncoder(&buf)
-	err := encoder.Encode(data)
-	if err != nil {
-		return nil, fmt.Errorf("error encoding data: %v", err)
-	}
-	return buf.Bytes(), nil
-}
-
 // Decode bytes back to map[string]string using gob
 func decodeMap(data []byte) (map[string]string, error) {
 	var result map[string]string

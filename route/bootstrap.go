@@ -2,14 +2,12 @@ package route
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"strings"
 
 	"log/slog"
-	"net/http"
 
 	v1 "raft/internal/gen/raft/v1"
-	"raft/internal/gen/raft/v1/raftv1connect"
 	"raft/internal/raft"
 
 	"connectrpc.com/connect"
@@ -54,56 +52,12 @@ func (s *BootstrapServer) AddReplica(ctx context.Context, req *connect.Request[v
 	if err := s.validator.Validate(req.Msg); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
-	nodes := s.raftServer.BootstrapNodes
-	s.raftServer.BootstrapNodes = append(s.raftServer.BootstrapNodes, req.Msg.Addr)
-	if ok := s.raftServer.ReplicaBootstrapConnMap[req.Msg.Addr]; ok != nil {
-		// raft server already present
-		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
-		return connect.NewResponse(&v1.AddrInfoStatus{
-			IsAdded: false,
-		}), nil
+
+	s.raftServer.JoinMember(strings.Split(req.Msg.Addr, ":")[0])
+	var nodes []string
+	for _, member := range s.raftServer.Memberlist().Members() {
+		nodes = append(nodes, member.Address())
 	}
-
-	s.raftServer.ReplicaBootstrapConnMapLock.Lock()
-	s.raftServer.ReplicaBootstrapConnMap[req.Msg.Addr] = raftv1connect.NewBootstrapServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
-	s.raftServer.ReplicaBootstrapConnMapLock.Unlock()
-
-	if ok := s.raftServer.ReplicaElectionConnMap[req.Msg.Addr]; ok != nil {
-		// raft server already present
-		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
-		return connect.NewResponse(&v1.AddrInfoStatus{
-			IsAdded: false,
-		}), nil
-	}
-
-	s.raftServer.ReplicaElectionConnMapLock.Lock()
-	s.raftServer.ReplicaElectionConnMap[req.Msg.Addr] = raftv1connect.NewElectionServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
-	s.raftServer.ReplicaElectionConnMapLock.Unlock()
-
-	if ok := s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr]; ok != nil {
-		// raft server already present
-		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
-		return connect.NewResponse(&v1.AddrInfoStatus{
-			IsAdded: false,
-		}), nil
-	}
-
-	s.raftServer.ReplicaHeartbeatConnMapLock.Lock()
-	s.raftServer.ReplicaHeartbeatConnMap[req.Msg.Addr] = raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
-	s.raftServer.ReplicaHeartbeatConnMapLock.Unlock()
-
-	if ok := s.raftServer.ReplicaReplicateConnMap[req.Msg.Addr]; ok != nil {
-		// raft server already present
-		s.logger.Warn("raft server already present in replicaConnMap", "address", req.Msg.Addr) // Use slog for logging
-		return connect.NewResponse(&v1.AddrInfoStatus{
-			IsAdded: false,
-		}), nil
-	}
-
-	s.raftServer.ReplicaReplicateConnMapLock.Lock()
-	s.raftServer.ReplicaReplicateConnMap[req.Msg.Addr] = raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", req.Msg.Addr))
-	s.raftServer.ReplicaReplicateConnMapLock.Unlock()
-
 	return connect.NewResponse(&v1.AddrInfoStatus{
 		IsAdded: true,
 		Nodes:   nodes,

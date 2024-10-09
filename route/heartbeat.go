@@ -5,6 +5,7 @@ import (
 	"log" // Remove this import
 	raftv1 "raft/internal/gen/raft/v1"
 	"raft/internal/raft"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/bufbuild/protovalidate-go"
@@ -53,10 +54,10 @@ func (s *HeartbeatServer) SendHeartbeat(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	s.raftServer.SetLeader(req.Msg.Addr)
-	s.raftServer.BootstrapNodes = []string{req.Msg.Addr}
+	s.raftServer.JoinMember(req.Msg.Addr)
 	for _, n := range req.Msg.Node {
 		if n != s.raftServer.Addr() {
-			s.raftServer.BootstrapNodes = append(s.raftServer.BootstrapNodes, n)
+			s.raftServer.JoinMember(strings.Split(n, ":")[0])
 		}
 	}
 	if s.raftServer.Heartbeat != nil {

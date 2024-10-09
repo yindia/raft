@@ -1,0 +1,58 @@
+version: '3.1'
+
+services:
+  master:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      - raft-cluster
+    command:
+      - raft
+    ports:
+      - "12000:12000"
+      - "7946:7946"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:12000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  node1:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    links:
+      - master
+    depends_on:
+      - master
+    networks:
+      - raft-cluster
+    command:
+      - raft
+      - --join=http://master:12000
+    ports:
+      - "12001:12000"
+      - "7948:7946" 
+  node2:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    links:
+      - master
+    depends_on:
+      - master
+    networks:
+      - raft-cluster
+    command:
+      - raft
+      - --join=http://master:12000
+    ports:
+      - "12002:12000"
+      - "7949:7946"
+networks:
+  raft-cluster:
+    driver: bridge

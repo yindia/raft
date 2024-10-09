@@ -14,6 +14,8 @@ import (
 	"raft/internal/heartbeat"
 	"raft/internal/logfile"
 
+	"github.com/hashicorp/memberlist"
+
 	"connectrpc.com/connect"
 	"golang.org/x/exp/slog" // Import the slog package
 )
@@ -61,39 +63,30 @@ type RaftServer struct {
 	Heartbeat      *heartbeat.Heartbeat      // Heartbeat for the server
 	currentTerm    int                       // Current term of the server
 	commitIndex    int                       // Index of the last committed entry
+	memberlist     *memberlist.Memberlist    // Memberlist for the server
 
-	// ReplicaConnMap maintains connections to other replicas to reduce latency.
-	ReplicaElectionConnMap     ReplicaConnMap[string, raftv1connect.ElectionServiceClient]
-	ReplicaElectionConnMapLock sync.RWMutex
-
-	ReplicaHeartbeatConnMap     ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]
-	ReplicaHeartbeatConnMapLock sync.RWMutex
-
-	ReplicaBootstrapConnMap     ReplicaConnMap[string, raftv1connect.BootstrapServiceClient]
-	ReplicaBootstrapConnMapLock sync.RWMutex
-
-	ReplicaReplicateConnMap     ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient]
-	ReplicaReplicateConnMapLock sync.RWMutex
 }
 
 type ReplicaConnMap[K comparable, V any] map[K]V
 
 // NewRaftServer creates a new Raft server instance with the provided options.
 func NewRaftServer(opts RaftServerOpts) (*RaftServer, map[string]string) {
+
+	list, err := memberlist.Create(memberlist.DefaultLocalConfig())
+	if err != nil {
+		panic("Failed to create memberlist: " + err.Error())
+	}
+
 	raftServer := &RaftServer{
 		role:           opts.Role,
 		BootstrapNodes: opts.BootstrapNodes,
 		Heartbeat:      heartbeat.NewHeartbeat(HEARTBEAT_PERIOD, func() {}),
 		logfile:        logfile.NewLogfile(),
 		localAddr:      opts.Address,
-
-		ReplicaElectionConnMap:  make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient]),
-		ReplicaHeartbeatConnMap: make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]),
-		ReplicaBootstrapConnMap: make(ReplicaConnMap[string, raftv1connect.BootstrapServiceClient]),
-		ReplicaReplicateConnMap: make(ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient]),
+		memberlist:     list,
 	}
 	filePath := fmt.Sprintf("%s/%s.%s", SNAPSHOTS_DIR, opts.Address, FILE_EXTENSION)
-	_, err := os.Stat(filePath)
+	_, err = os.Stat(filePath)
 	if err != nil {
 		logger.Info(fmt.Sprintf("[%s] Snapshot not found. Creating a new RaftServer instance.", opts.Address))
 		return raftServer, make(map[string]string)
@@ -148,6 +141,18 @@ func (s *RaftServer) Addr() string {
 	return s.localAddr
 }
 
+func (s *RaftServer) Memberlist() *memberlist.Memberlist {
+	return s.memberlist
+}
+
+func (s *RaftServer) JoinMember(addr string) *memberlist.Memberlist {
+	_, err := s.memberlist.Join([]string{addr})
+	if err != nil {
+		panic("Failed to join cluster: " + err.Error())
+	}
+	return s.memberlist
+}
+
 func (s *RaftServer) Leader() string {
 	return s.leaderAddr
 }
@@ -167,7 +172,7 @@ func (s *RaftServer) bootstrapNetwork() {
 
 func (s *RaftServer) connectToBootstrapNodes() {
 	wg := &sync.WaitGroup{}
-	for _, addr := range s.BootstrapNodes {
+	for _, member := range s.memberlist.Members() {
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
@@ -177,16 +182,7 @@ func (s *RaftServer) connectToBootstrapNodes() {
 			}
 			logger.Info(fmt.Sprintf("Attempting to connect with bootstrap node [%s].", addr))
 
-			s.ReplicaElectionConnMap = make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient])
-			s.ReplicaHeartbeatConnMap = make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient])
-			s.ReplicaBootstrapConnMap = make(ReplicaConnMap[string, raftv1connect.BootstrapServiceClient])
-			s.ReplicaReplicateConnMap = make(ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient])
-
-			connectClient[raftv1connect.BootstrapServiceClient](&s.ReplicaBootstrapConnMap, &s.ReplicaBootstrapConnMapLock, addr, raftv1connect.NewBootstrapServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
-			connectClient[raftv1connect.ElectionServiceClient](&s.ReplicaElectionConnMap, &s.ReplicaElectionConnMapLock, addr, raftv1connect.NewElectionServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
-			connectClient[raftv1connect.HeartbeatServiceClient](&s.ReplicaHeartbeatConnMap, &s.ReplicaHeartbeatConnMapLock, addr, raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
-			connectClient[raftv1connect.ReplicateOperationServiceClient](&s.ReplicaReplicateConnMap, &s.ReplicaReplicateConnMapLock, addr, raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
-		}(addr)
+		}(member.Address())
 	}
 	wg.Wait()
 	logger.Info("Bootstrapping completed for server.")
@@ -199,7 +195,7 @@ func (s *RaftServer) startHeartbeatTimeoutProcess() error {
 		logger.Info("Role changed to CANDIDATE, requesting votes.")
 		votesWon := s.requestVotes()
 		totalVotes := 1 + votesWon
-		totalCandidates := 1 + len(s.ReplicaHeartbeatConnMap)
+		totalCandidates := 1 + len(s.memberlist.Members())
 		logger.Info(fmt.Sprintf("Total votes: %d, Total candidates: %d", totalVotes, totalCandidates))
 		// A candidate wins the election and becomes a leader
 		// if it receives more than half of the total votes
@@ -238,13 +234,10 @@ func (s *RaftServer) startHeartbeatTimeoutProcess() error {
 // It returns the number of votes received along with error (if any)
 func (s *RaftServer) requestVotes() int {
 	var numVotes int = 0
-
-	s.ReplicaElectionConnMapLock.RLock()
-	defer s.ReplicaElectionConnMapLock.RUnlock()
-
 	// iterate over replica addresses and request
 	// vote from each replica
-	for _, conn := range s.ReplicaElectionConnMap {
+	for _, member := range s.memberlist.Members() {
+		conn := raftv1connect.NewElectionServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", member.Address()))
 		response, err := conn.Voting(
 			context.Background(),
 			connect.NewRequest(&raftv1.VoteRequest{LogfileIndex: uint64(s.commitIndex)}),
@@ -267,7 +260,7 @@ func (s *RaftServer) sendHeartbeatPeriodically() {
 	// start the process of sending heartbeat for a leader
 	for {
 		aliveReplicas := s.sendHeartbeat()
-		if aliveReplicas < (len(s.ReplicaHeartbeatConnMap)-1)/2 {
+		if aliveReplicas < (len(s.memberlist.Members())-1)/2 {
 			panic("more than half of the replicas are down")
 		}
 		time.Sleep(HEARTBEAT_PERIOD)
@@ -276,8 +269,8 @@ func (s *RaftServer) sendHeartbeatPeriodically() {
 
 func (s *RaftServer) sendHeartbeat() int {
 	aliveCount := 0
-	s.ReplicaHeartbeatConnMapLock.RLock()
-	for _, conn := range s.ReplicaHeartbeatConnMap {
+	for _, member := range s.memberlist.Members() {
+		conn := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", member.Address()))
 		response, err := conn.SendHeartbeat(
 			context.Background(),
 			connect.NewRequest(&raftv1.HeartbeatRequest{
@@ -293,7 +286,6 @@ func (s *RaftServer) sendHeartbeat() int {
 			aliveCount++
 		}
 	}
-	s.ReplicaHeartbeatConnMapLock.RUnlock()
 	logger.Info(fmt.Sprintf("Alive replicas: %d", aliveCount)) // Log the number of alive replicas
 	return aliveCount
 }
@@ -305,7 +297,7 @@ func (s *RaftServer) ConvertToTransaction(operation string) (*logfile.Transactio
 
 // Performs a two phase commit on all the FOLLOWERS
 func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
-	s.ReplicaReplicateConnMapLock.RLock()
+
 	wg := &sync.WaitGroup{}
 
 	// First phase of the TwoPhaseCommit: Commit operation
@@ -316,10 +308,11 @@ func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
 		panic(fmt.Errorf(" %v", err))
 	}
 
-	logger.Info(fmt.Sprintf("[%s] performing commit operation on %d followers\n", len(s.ReplicaReplicateConnMap)))
+	logger.Info(fmt.Sprintf("[%s] performing commit operation on %d followers\n", len(s.memberlist.Members())))
 
-	for addr, conn := range s.ReplicaReplicateConnMap {
-		logger.Info(fmt.Sprintf("[%s] sending (CommitOperation: %s) to [%s]\n", txn.Operation, addr))
+	for _, member := range s.memberlist.Members() {
+		conn := raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", member.Address()))
+		logger.Info(fmt.Sprintf("[%s] sending (CommitOperation: %s) to [%s]\n", txn.Operation, member.Address()))
 		response, err := conn.CommitOperation(
 			context.Background(),
 			connect.NewRequest(&raftv1.CommitTransaction{
@@ -335,20 +328,20 @@ func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
 			// some logs. So the LEADER will replicate all the missing logs in the FOLLOWER
 			if response != nil {
 				wg.Add(1)
-				go s.replicateMissingLogs(int(response.Msg.LogfileFinalIndex), addr, conn, wg)
+				go s.replicateMissingLogs(int(response.Msg.LogfileFinalIndex), member.Address(), conn, wg)
 			} else {
-				logger.Error("No response received while committing operation", "address", addr) // Added logging
+				logger.Error("No response received while committing operation", "address", member.Address()) // Added logging
 				return err
 			}
 		} else {
-			logger.Info(fmt.Sprintf("Successfully sent commit operation to [%s]", addr)) // Added logging
+			logger.Info(fmt.Sprintf("Successfully sent commit operation to [%s]", member.Address())) // Added logging
 		}
 	}
 
 	// wait for all FOLLOWERS to be consistent
 	wg.Wait()
 
-	logger.Info(fmt.Sprintf("[%s] performing (ApplyOperation) on %d followers\n", len(s.ReplicaReplicateConnMap)))
+	logger.Info(fmt.Sprintf("[%s] performing (ApplyOperation) on %d followers\n", len(s.memberlist.Members())))
 
 	// Second phase of the TwoPhaseCommit: Apply operation
 
@@ -358,7 +351,8 @@ func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
 		panic(err)
 	}
 
-	for _, conn := range s.ReplicaReplicateConnMap {
+	for _, member := range s.memberlist.Members() {
+		conn := raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", member.Address()))
 		_, err := conn.ApplyOperation(
 			context.Background(),
 			connect.NewRequest(&raftv1.ApplyOperationRequest{}),
@@ -368,7 +362,6 @@ func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
 			return err
 		}
 	}
-	s.ReplicaReplicateConnMapLock.RUnlock()
 
 	s.commitIndex++ // increment the final commitIndex after applying changes
 
@@ -423,11 +416,9 @@ func (s *RaftServer) Apply(operation string) error {
 		return s.PerformTwoPhaseCommit(txn)
 	}
 	logger.Info(fmt.Sprintf("[%s] forwarding operation (%s) to leader [%s]\n", operation, s.leaderAddr))
-	s.ReplicaReplicateConnMapLock.RLock()
-	defer s.ReplicaReplicateConnMapLock.RUnlock()
 
 	// sending operation to the LEADER to perform a TwoPhaseCommit
-	return sendOperationToLeader(operation, s.ReplicaReplicateConnMap[s.leaderAddr])
+	return sendOperationToLeader(operation, raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", s.leaderAddr)))
 }
 
 // `sendOperationToLeader` is called when an operation reaches a FOLLOWER.
@@ -458,9 +449,7 @@ func (s *RaftServer) PerformOperation(operation string) error {
 		return s.PerformTwoPhaseCommit(txn)
 	}
 	log.Printf("forwarding operation (%s) to leader [%s]\n", operation, s.leaderAddr)
-	s.ReplicaReplicateConnMapLock.RLock()
-	defer s.ReplicaReplicateConnMapLock.RUnlock()
 
 	// sending operation to the LEADER to perform a TwoPhaseCommit
-	return sendOperationToLeader(operation, s.ReplicaReplicateConnMap[s.leaderAddr])
+	return sendOperationToLeader(operation, raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", s.leaderAddr)))
 }

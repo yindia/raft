@@ -32,8 +32,8 @@ const (
 )
 
 const (
-	HEARTBEAT_PERIOD  = time.Second * 10 // Duration between heartbeats
-	HEARTBEAT_TIMEOUT = time.Second * 10 // Timeout for heartbeat responses
+	HEARTBEAT_PERIOD  = time.Second * 3 // Duration between heartbeats
+	HEARTBEAT_TIMEOUT = time.Second * 6 // Timeout for heartbeat responses
 )
 
 // Initialize the logger
@@ -200,7 +200,7 @@ func (s *RaftServer) startHeartbeatTimeoutProcess() error {
 		votesWon := s.requestVotes()
 		totalVotes := 1 + votesWon
 		totalCandidates := 1 + len(s.ReplicaHeartbeatConnMap)
-
+		logger.Info(fmt.Sprintf("Total votes: %d, Total candidates: %d", totalVotes, totalCandidates))
 		// A candidate wins the election and becomes a leader
 		// if it receives more than half of the total votes
 		if totalVotes >= totalCandidates/2 {

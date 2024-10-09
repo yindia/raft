@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package raft.v1;
+
+import "google/protobuf/duration.proto";
+import "validate/validate.proto";
+
+// AddrInfoStatus represents the result of adding a replica.
+message AddrInfoStatus {
+  // Indicates whether the replica was successfully added.
+  bool is_added = 1 [(validate.rules).bool.const = true];
+}
+
+// AddrInfo contains the address information for a replica.
+message AddrInfo {
+  // The network address of the replica (e.g., "host:port").
+  string addr = 1 [(validate.rules).string = {
+    min_len: 1,
+    max_len: 253,
+    pattern: "^[a-zA-Z0-9.-]+:[0-9]{1,5}$"
+  }];
+}
+
+// BootstrapService provides methods for managing replicas in a Raft cluster.
+service BootstrapService {
+  // Adds a new replica to the Raft cluster.
+  rpc AddReplica(AddrInfo) returns (AddrInfoStatus) {}
+}

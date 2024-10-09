@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package raft.v1;
+
+import "google/protobuf/duration.proto";
+import "validate/validate.proto";
+
+// VoteRequest represents a request for a vote in the Raft election process.
+message VoteRequest {
+  // The index of the candidate's last log entry.
+  uint64 logfile_index = 1 [(validate.rules).uint64.gt = 0];
+}
+
+// VoteResponse represents the response to a vote request.
+message VoteResponse {
+  // VoteType indicates the type of vote response.
+  enum VoteType {
+    VOTE_TYPE_UNSPECIFIED = 0;
+    VOTE_TYPE_REQUESTED = 1;
+    VOTE_TYPE_GIVEN = 2;
+    VOTE_TYPE_REFUSED = 3;
+  }
+  // The type of vote response.
+  VoteType vote_type = 1 [(validate.rules).enum = {defined_only: true, not_in: [0]}];
+}
+
+// ElectionService provides methods for managing the Raft election process.
+service ElectionService {
+  // Voting handles vote requests from candidates.
+  rpc Voting(VoteRequest) returns (VoteResponse) {}
+}

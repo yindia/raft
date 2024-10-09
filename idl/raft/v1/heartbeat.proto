@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package raft.v1;
+
+import "validate/validate.proto";
+
+// HeartbeatRequest represents a request to send a heartbeat signal.
+message HeartbeatRequest {
+  // The ID of the sender node.
+  string sender_id = 1 [(validate.rules).string = {min_len: 1, max_len: 64}];
+
+  // The term of the sender node.
+  uint64 term = 2 [(validate.rules).uint64.gt = 0];
+}
+
+// HeartbeatResponse represents the response to a heartbeat request.
+message HeartbeatResponse {
+  // Indicates whether the heartbeat was acknowledged.
+  bool acknowledged = 1;
+
+  // The current term of the responding node.
+  uint64 term = 2 [(validate.rules).uint64.gt = 0];
+}
+
+// HeartbeatService provides methods for managing heartbeat signals in the Raft protocol.
+service HeartbeatService {
+  // SendHeartbeat handles heartbeat requests from nodes.
+  rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+}

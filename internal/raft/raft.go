@@ -83,6 +83,7 @@ func NewRaftServer(opts RaftServerOpts) (*RaftServer, map[string]string) {
 		ReplicaElectionConnMap:  make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient]),
 		ReplicaHeartbeatConnMap: make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]),
 		ReplicaBootstrapConnMap: make(ReplicaConnMap[string, raftv1connect.BootstrapServiceClient]),
+		ReplicaReplicateConnMap: make(ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient]),
 	}
 	filePath := fmt.Sprintf("%s/%s.%s", SNAPSHOTS_DIR, opts.Address, FILE_EXTENSION)
 	_, err := os.Stat(filePath)
@@ -261,4 +262,109 @@ func (s *RaftServer) sendHeartbeat() int {
 	}
 	s.ReplicaHeartbeatConnMapLock.RUnlock()
 	return aliveCount
+}
+
+func (s *RaftServer) ConvertToTransaction(operation string) (*logfile.Transaction, error) {
+	// structure of operation => operationName:value... for eg: "add:5"
+	return &logfile.Transaction{Index: s.commitIndex + 1, Operation: operation, Term: s.currentTerm}, nil
+}
+
+// Performs a two phase commit on all the FOLLOWERS
+func (s *RaftServer) PerformTwoPhaseCommit(txn *logfile.Transaction) error {
+	s.ReplicaReplicateConnMapLock.RLock()
+	wg := &sync.WaitGroup{}
+
+	// First phase of the TwoPhaseCommit: Commit operation
+
+	// CommitOperation on self
+	if _, err := s.logfile.CommitOperation(s.commitIndex, s.commitIndex, txn); err != nil {
+		panic(fmt.Errorf(" %v", err))
+	}
+
+	log.Printf("[%s] performing commit operation on %d followers\n", len(s.ReplicaReplicateConnMap))
+
+	for addr, conn := range s.ReplicaReplicateConnMap {
+
+		log.Printf("[%s] sending (CommitOperation: %s) to [%s]\n", txn.Operation, addr)
+		response, err := conn.CommitOperation(
+			context.Background(),
+			connect.NewRequest(&raftv1.CommitTransaction{
+				ExpectedFinalIndex: int64(s.commitIndex),
+				Index:              int64(txn.Index),
+				Operation:          txn.Operation,
+				Term:               int64(txn.Term),
+			}),
+		)
+		if err != nil {
+			log.Printf("[%s] received error in (CommitOperation) from [%s]: %v", addr, err)
+			// if there is both, an error and a response, the FOLLOWER is missing
+			// some logs. So the LEADER will replicate all the missing logs in the FOLLOWER
+			if response != nil {
+				wg.Add(1)
+				go s.replicateMissingLogs(int(response.Msg.LogfileFinalIndex), addr, conn, wg)
+			} else {
+				return err
+			}
+		}
+	}
+
+	// wait for all FOLLOWERS to be consistent
+	wg.Wait()
+
+	log.Printf("[%s] performing (ApplyOperation) on %d followers\n", len(s.ReplicaReplicateConnMap))
+
+	// Second phase of the TwoPhaseCommit: Apply operation
+
+	// ApplyOperation on self
+	if _, err := s.logfile.ApplyOperation(); err != nil {
+		panic(err)
+	}
+
+	for _, conn := range s.ReplicaReplicateConnMap {
+
+		_, err := conn.ApplyOperation(
+			context.Background(),
+			connect.NewRequest(&raftv1.ApplyOperationRequest{}),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	s.ReplicaReplicateConnMapLock.RUnlock()
+
+	s.commitIndex++ // increment the final commitIndex after applying changes
+
+	s.applyCh <- txn
+
+	return nil
+}
+
+// `replicateMissingLogs` makes a FOLLOWER consistent with the leader. This is
+// called when the FOLLOWER is missing some logs and refuses a commit operation
+// request from the LEADER
+func (s *RaftServer) replicateMissingLogs(startIndex int, addr string, client raftv1connect.ReplicateOperationServiceClient, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		startIndex++
+		txn, err := s.logfile.GetTransactionWithIndex(startIndex)
+		if err != nil {
+			log.Printf("[%s] error fetching (index: %d) from Logfile\n", startIndex)
+			break
+		}
+		if txn == nil {
+			break
+		}
+		_, err = client.CommitOperation(
+			context.Background(),
+			connect.NewRequest(&raftv1.CommitTransaction{
+				ExpectedFinalIndex: int64(startIndex),
+				Index:              int64(txn.Index),
+				Operation:          txn.Operation,
+				Term:               int64(txn.Term),
+			}),
+		)
+		if err != nil {
+			log.Printf("[%s] error replicating missing log (index: %d) to [%s]\n", startIndex, addr)
+		}
+	}
 }

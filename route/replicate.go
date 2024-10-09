@@ -88,5 +88,13 @@ func (s *ReplicateServer) ForwardOperation(ctx context.Context, req *connect.Req
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
+	txn, err := s.raftServer.ConvertToTransaction(req.Msg.Operation)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.raftServer.PerformTwoPhaseCommit(txn); err != nil {
+		return nil, err
+	}
+
 	return connect.NewResponse(&v1.ForwardOperationResponse{}), nil
 }

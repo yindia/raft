@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"raft/internal/gen/raft/v1/raftv1connect"
+	"raft/internal/raft"
 
 	"fmt"
 	"log/slog"
@@ -138,8 +139,14 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 	if err != nil {
 		return fmt.Errorf("failed to create interceptor: %w", err)
 	}
+
+	raftServer, _ := raft.NewRaftServer(raft.RaftServerOpts{
+		Address:        raftAddr,
+		BootstrapNodes: []string{},
+		Role:           raft.ROLE_LEADER,
+	})
 	pattern, handler := raftv1connect.NewBootstrapServiceHandler(
-		route.NewBootstrapServer(),
+		route.NewBootstrapServer(raftServer),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
 	)
@@ -147,7 +154,7 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 	mux.Handle(pattern, middleware.Wrap(handler))
 
 	pattern, handler = raftv1connect.NewElectionServiceHandler(
-		route.NewElectionServer(),
+		route.NewElectionServer(raftServer),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
 	)
@@ -155,7 +162,7 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 	mux.Handle(pattern, middleware.Wrap(handler))
 
 	pattern, handler = raftv1connect.NewHeartbeatServiceHandler(
-		route.NewHeartbeatServer(),
+		route.NewHeartbeatServer(raftServer),
 		connect.WithInterceptors(otelInterceptor),
 		connect.WithCompressMinBytes(compressMinBytes),
 	)

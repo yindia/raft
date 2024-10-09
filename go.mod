@@ -17,7 +17,6 @@ require (
 	github.com/spf13/cobra v1.8.1
 	go.akshayshah.org/connectauth v0.6.0
 	golang.org/x/net v0.26.0
-	google.golang.org/grpc v1.62.1
 	google.golang.org/protobuf v1.34.2
 )
 
@@ -28,7 +27,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/cel-go v0.21.0 // indirect
 	github.com/hashicorp/go-immutable-radix v1.3.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect

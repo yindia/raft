@@ -5,6 +5,7 @@ import (
 	"log"
 
 	v1 "raft/internal/gen/raft/v1"
+	"raft/internal/raft"
 
 	"connectrpc.com/connect"
 	"github.com/bufbuild/protovalidate-go"
@@ -18,21 +19,23 @@ type HeartbeatServiceHandler interface {
 // HeartbeatServer represents the server handling Redis-like operations.
 // It implements the v1.RedisServiceHandler interface.
 type HeartbeatServer struct {
-	validator *protovalidate.Validator
-	logger    *log.Logger
+	validator  *protovalidate.Validator
+	logger     *log.Logger
+	raftServer *raft.RaftServer
 }
 
 // NewHeartbeatServer creates and returns a new instance of HeartbeatServer.
 // It initializes the validator and sets up the logger.
-func NewHeartbeatServer() *HeartbeatServer {
+func NewHeartbeatServer(raftServer *raft.RaftServer) *HeartbeatServer {
 	validator, err := protovalidate.New()
 	if err != nil {
 		log.Fatalf("Failed to initialize validator: %v", err)
 	}
 
 	server := &HeartbeatServer{
-		validator: validator,
-		logger:    log.New(log.Writer(), "HeartbeatServer: ", log.LstdFlags|log.Lshortfile),
+		validator:  validator,
+		logger:     log.New(log.Writer(), "HeartbeatServer: ", log.LstdFlags|log.Lshortfile),
+		raftServer: raftServer,
 	}
 
 	server.logger.Println("HeartbeatServer initialized successfully")
@@ -44,7 +47,8 @@ func (s *HeartbeatServer) SendHeartbeat(ctx context.Context, req *connect.Reques
 	if err := s.validator.Validate(req.Msg); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+
 	return connect.NewResponse(&v1.HeartbeatResponse{
-		Acknowledged: false,
+		IsAlive: true,
 	}), nil
 }

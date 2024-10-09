@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const FILE_EXTENSION = "bin"
@@ -45,6 +46,20 @@ func readFile(dirPath string, fileName string) ([]byte, error) {
 	}
 	file.Close()
 	return data, nil
+}
+
+func connectClient[T any](
+	connMap *ReplicaConnMap[string, T],
+	lock *sync.RWMutex,
+	addr string,
+	clientConstructor T,
+) {
+	lock.Lock()
+	defer lock.Unlock()
+
+	if _, ok := (*connMap)[addr]; !ok {
+		(*connMap)[addr] = clientConstructor
+	}
 }
 
 func destructureSnapshot(content []byte) (int, map[string]string) {

@@ -31,7 +31,7 @@ const (
 )
 
 const (
-	HEARTBEAT_PERIOD  = time.Second * 1  // Duration between heartbeats
+	HEARTBEAT_PERIOD  = time.Second * 10 // Duration between heartbeats
 	HEARTBEAT_TIMEOUT = time.Second * 10 // Timeout for heartbeat responses
 )
 
@@ -86,6 +86,7 @@ func NewRaftServer(opts RaftServerOpts) (*RaftServer, map[string]string) {
 		logfile:        logfile.NewLogfile(),
 		applyCh:        make(chan *logfile.Transaction),
 		localAddr:      opts.Address,
+		commitIndex:    0,
 
 		ReplicaElectionConnMap:  make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient]),
 		ReplicaHeartbeatConnMap: make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient]),
@@ -115,7 +116,7 @@ func (s *RaftServer) Start() error {
 	time.Sleep(time.Second * 3) // Wait for the server to start
 
 	// Send requests to bootstrapped servers to add this server to their `replicaConnMap`.
-	s.bootstrapNetwork()
+	go s.bootstrapNetwork()
 
 	s.startHeartbeatTimeoutProcess()
 
@@ -147,23 +148,45 @@ func (s *RaftServer) Role() int {
 	return int(s.role)
 }
 
+func (s *RaftServer) Addr() string {
+	return s.localAddr
+}
+
 // bootstrapNetwork sends requests to other replicas to add this server to their replicaConnMap.
 func (s *RaftServer) bootstrapNetwork() {
+	ticker := time.NewTicker(30 * time.Second) // Run every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.connectToBootstrapNodes()
+		}
+	}
+}
+
+func (s *RaftServer) connectToBootstrapNodes() {
 	wg := &sync.WaitGroup{}
 	for _, addr := range s.BootstrapNodes {
 		wg.Add(1)
-		if len(addr) == 0 {
-			logger.Warn("Skipping empty bootstrap address.")
-			wg.Done()
-			continue
-		}
-		go func(s *RaftServer, addr string, wg *sync.WaitGroup) {
+		go func(addr string) {
+			defer wg.Done()
+			if len(addr) == 0 {
+				logger.Warn("Skipping empty bootstrap address.")
+				return
+			}
 			logger.Info(fmt.Sprintf("Attempting to connect with bootstrap node [%s].", addr))
-			client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
-			fmt.Println("connected to", client)
 
-			wg.Done()
-		}(s, addr, wg)
+			s.ReplicaElectionConnMap = make(ReplicaConnMap[string, raftv1connect.ElectionServiceClient])
+			s.ReplicaHeartbeatConnMap = make(ReplicaConnMap[string, raftv1connect.HeartbeatServiceClient])
+			s.ReplicaBootstrapConnMap = make(ReplicaConnMap[string, raftv1connect.BootstrapServiceClient])
+			s.ReplicaReplicateConnMap = make(ReplicaConnMap[string, raftv1connect.ReplicateOperationServiceClient])
+
+			connectClient[raftv1connect.BootstrapServiceClient](&s.ReplicaBootstrapConnMap, &s.ReplicaBootstrapConnMapLock, addr, raftv1connect.NewBootstrapServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
+			connectClient[raftv1connect.ElectionServiceClient](&s.ReplicaElectionConnMap, &s.ReplicaElectionConnMapLock, addr, raftv1connect.NewElectionServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
+			connectClient[raftv1connect.HeartbeatServiceClient](&s.ReplicaHeartbeatConnMap, &s.ReplicaHeartbeatConnMapLock, addr, raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
+			connectClient[raftv1connect.ReplicateOperationServiceClient](&s.ReplicaReplicateConnMap, &s.ReplicaReplicateConnMapLock, addr, raftv1connect.NewReplicateOperationServiceClient(http.DefaultClient, fmt.Sprintf("http://%s", addr)))
+		}(addr)
 	}
 	wg.Wait()
 	logger.Info("Bootstrapping completed for server.")
@@ -260,6 +283,7 @@ func (s *RaftServer) sendHeartbeat() int {
 			connect.NewRequest(&raftv1.HeartbeatRequest{
 				IsAlive: true,
 				Addr:    s.leaderAddr,
+				Node:    s.BootstrapNodes,
 			}),
 		)
 		if err != nil {
@@ -270,7 +294,7 @@ func (s *RaftServer) sendHeartbeat() int {
 		}
 	}
 	s.ReplicaHeartbeatConnMapLock.RUnlock()
-	logger.Info(fmt.Sprintf("Alive replicas: %d", s.BootstrapNodes)) // Log the number of alive replicas
+	logger.Info(fmt.Sprintf("Alive replicas: %d", aliveCount)) // Log the number of alive replicas
 	return aliveCount
 }
 

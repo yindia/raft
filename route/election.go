@@ -53,14 +53,14 @@ func (s *ElectionServer) Voting(ctx context.Context, req *connect.Request[v1.Vot
 	}
 
 	var voteType v1.VoteResponse_VoteType
-	if uint64(s.raftServer.CommitIndex()) < req.Msg.LogfileIndex && s.raftServer.Role() != raft.ROLE_LEADER {
+	if uint64(s.raftServer.CommitIndex()) <= req.Msg.LogfileIndex && s.raftServer.Role() != raft.ROLE_LEADER {
 		voteType = v1.VoteResponse_VOTE_TYPE_GIVEN
 		s.logger.Info("Vote granted", "logfileIndex", req.Msg.LogfileIndex, "role", s.raftServer.Role()) // Log vote granted
 	} else {
 		voteType = v1.VoteResponse_VOTE_TYPE_REFUSED
 		s.logger.Info("Vote not granted", "logfileIndex", req.Msg.LogfileIndex, "role", s.raftServer.Role()) // Log vote not granted
 	}
-
+	s.logger.Debug("Vote granted", "logfileIndex", req.Msg.LogfileIndex, "role", voteType) // Log vote granted
 	return connect.NewResponse(&v1.VoteResponse{
 		VoteType: voteType,
 	}), nil

@@ -11,7 +11,9 @@ message HeartbeatRequest {
     bool isAlive = 1; // Removed validation for bool
   
     // The term of the sender node.
-    string Addr = 2 [(validate.rules).string = {min_len: 1, max_len: 64}]; // Unchanged
+    string addr = 2 [(validate.rules).string = {min_len: 1, max_len: 64}]; // Unchanged
+
+    repeated string node = 3 [(validate.rules).repeated = {min_items: 0}];
   }
   
   // HeartbeatResponse represents the response to a heartbeat request.
@@ -21,9 +23,10 @@ message HeartbeatRequest {
     bool isAlive = 1; // Removed validation for bool
   
     // The term of the sender node.
-    string Addr = 2 [(validate.rules).string = {min_len: 1, max_len: 64}]; // Unchanged
+    string addr = 2 [(validate.rules).string = {min_len: 1, max_len: 64}]; // Unchanged
+
   }
-  
+
 // HeartbeatService provides methods for managing heartbeat signals in the Raft protocol.
 service HeartbeatService {
   // SendHeartbeat handles heartbeat requests from nodes.

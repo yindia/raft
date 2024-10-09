@@ -53,7 +53,12 @@ func (s *HeartbeatServer) SendHeartbeat(ctx context.Context, req *connect.Reques
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	s.raftServer.SetLeader(req.Msg.Addr)
-
+	s.raftServer.BootstrapNodes = []string{req.Msg.Addr}
+	for _, n := range req.Msg.Node {
+		if n != s.raftServer.Addr() {
+			s.raftServer.BootstrapNodes = append(s.raftServer.BootstrapNodes, n)
+		}
+	}
 	if s.raftServer.Heartbeat != nil {
 		s.raftServer.Heartbeat.Beat()
 		s.logger.Info("Heartbeat sent", slog.String("leader_addr", req.Msg.Addr)) // Log when heartbeat is sent

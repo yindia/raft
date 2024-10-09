@@ -103,6 +103,7 @@ func runRootCommand() error {
 
 	mux := http.NewServeMux()
 	if err := setupHandlers(mux, middleware, raftServer); err != nil {
+		slog.Error("Failed to set up handlers", "error", err) // Improved logging
 		return fmt.Errorf("failed to set up handlers: %w", err)
 	}
 
@@ -113,10 +114,12 @@ func runRootCommand() error {
 	serverErrChan := startServer(srv)
 
 	if joinAddr != "" {
-		fmt.Println(raftv1connect.NewBootstrapServiceClient(http.DefaultClient, joinAddr).AddReplica(context.Background(), connect.NewRequest((&raftv1.AddrInfo{
+		slog.Info("Attempting to add replica", "joinAddr", joinAddr) // Improved logging
+		if _, err := raftv1connect.NewBootstrapServiceClient(http.DefaultClient, joinAddr).AddReplica(context.Background(), connect.NewRequest((&raftv1.AddrInfo{
 			Addr: httpAddr,
-		}))))
-
+		}))); err != nil {
+			slog.Error("Failed to add replica", "error", err) // Improved logging
+		}
 	}
 	return handleServerLifecycle(srv, exitChan, serverErrChan)
 }
@@ -139,6 +142,7 @@ func initLogger(level string) {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 	slog.SetDefault(logger)
+	slog.Info("Logger initialized", "level", logLevel) // Added logging for logger initialization
 }
 
 func authenticateRequest(ctx context.Context, req *connectauth.Request) (any, error) {
@@ -228,6 +232,7 @@ func handleServerLifecycle(srv *http.Server, exitChan chan os.Signal, serverErrC
 	case <-exitChan:
 		slog.Info("Shutdown signal received, shutting down server...")
 	case err := <-serverErrChan:
+		slog.Error("Server error occurred", "error", err) // Improved logging
 		return err
 	}
 

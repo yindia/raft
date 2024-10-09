@@ -153,11 +153,13 @@ func (s *RaftServer) bootstrapNetwork() {
 		go func(s *RaftServer, addr string, wg *sync.WaitGroup) {
 			log.Printf("Attempting to connect with bootstrap node [%s].", addr)
 			client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
-			if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
-				log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
-			} else {
-				log.Printf("Successfully connected to bootstrap node [%s].", addr)
-			}
+			// if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
+			// 	log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
+			// } else {
+			// 	log.Printf("Successfully connected to bootstrap node [%s].", addr)
+			// }
+			fmt.Println("connected to", client)
+
 			wg.Done()
 		}(s, addr, wg)
 	}
@@ -367,4 +369,39 @@ func (s *RaftServer) replicateMissingLogs(startIndex int, addr string, client ra
 			log.Printf("[%s] error replicating missing log (index: %d) to [%s]\n", startIndex, addr)
 		}
 	}
+}
+
+// Performs the operation requested by the client.
+func (s *RaftServer) Apply(operation string) error {
+	// only the LEADER is allowed to perform the operation
+	// and it then replicates that operation across all the nodes.
+	// if the current node is not a LEADER, the operation request
+	// will be forwarded to the LEADER, who will then perform the operation
+	log.Printf("[%s] received operation (%s)\n", operation)
+	if s.role == ROLE_LEADER {
+		txn, err := s.ConvertToTransaction(operation)
+		if err != nil {
+			return fmt.Errorf("[%s] error while converting to transaction")
+		}
+		return s.PerformTwoPhaseCommit(txn)
+	}
+	log.Printf("[%s] forwarding operation (%s) to leader [%s]\n", operation, s.leaderAddr)
+	s.ReplicaReplicateConnMapLock.RLock()
+	defer s.ReplicaReplicateConnMapLock.RUnlock()
+
+	// sending operation to the LEADER to perform a TwoPhaseCommit
+	return sendOperationToLeader(operation, s.ReplicaReplicateConnMap[s.leaderAddr])
+}
+
+// `sendOperationToLeader` is called when an operation reaches a FOLLOWER.
+// This function forwards the operation to the LEADER
+func sendOperationToLeader(operation string, conn raftv1connect.ReplicateOperationServiceClient) error {
+	_, err := conn.ForwardOperation(
+		context.Background(),
+		connect.NewRequest(&raftv1.ForwardOperationRequest{Operation: operation}),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
 }

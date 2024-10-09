@@ -47,6 +47,14 @@ func (s *HeartbeatServer) SendHeartbeat(ctx context.Context, req *connect.Reques
 	if err := s.validator.Validate(req.Msg); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	s.raftServer.SetLeader(req.Msg.Addr)
+
+	if s.raftServer.Heartbeat != nil {
+		s.raftServer.Heartbeat.Beat()
+		return connect.NewResponse(&v1.HeartbeatResponse{
+			IsAlive: true,
+		}), nil
+	}
 
 	return connect.NewResponse(&v1.HeartbeatResponse{
 		IsAlive: true,

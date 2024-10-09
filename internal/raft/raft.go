@@ -114,6 +114,10 @@ func (s *RaftServer) Role() int {
 	return int(s.role)
 }
 
+func (s *RaftServer) SetLeader(addr string) {
+	s.leaderAddr = addr
+}
+
 // bootstrapNetwork sends requests to other replicas to add this server to their replicaConnMap.
 func (s *RaftServer) bootstrapNetwork() {
 	wg := &sync.WaitGroup{}
@@ -126,12 +130,12 @@ func (s *RaftServer) bootstrapNetwork() {
 		}
 		go func(s *RaftServer, addr string, wg *sync.WaitGroup) {
 			log.Printf("Attempting to connect with bootstrap node [%s].", addr)
-			client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
-			if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
-				log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
-			} else {
-				log.Printf("Successfully connected to bootstrap node [%s].", addr)
-			}
+			// client := raftv1connect.NewHeartbeatServiceClient(http.DefaultClient, addr)
+			// if _, err := client.SendHeartbeat(context.Background(), connect.NewRequest(&raftv1.HeartbeatRequest{})); err != nil {
+			// 	log.Printf("Failed to connect to bootstrap node [%s]: %v", addr, err)
+			// } else {
+			// 	log.Printf("Successfully connected to bootstrap node [%s].", addr)
+			// }
 			wg.Done()
 		}(s, addr, wg)
 	}

@@ -143,7 +143,7 @@ func setupHandlers(mux *http.ServeMux, middleware *connectauth.Middleware) error
 	raftServer, _ := raft.NewRaftServer(raft.RaftServerOpts{
 		Address:        raftAddr,
 		BootstrapNodes: []string{},
-		Role:           raft.ROLE_LEADER,
+		Role:           raft.ROLE_FOLLOWER,
 	})
 	pattern, handler := raftv1connect.NewBootstrapServiceHandler(
 		route.NewBootstrapServer(raftServer),
